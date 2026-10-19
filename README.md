@@ -1,0 +1,1 @@
+# deriv-site.dev
