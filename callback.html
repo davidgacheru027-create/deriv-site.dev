@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signing in</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0; padding: 1.25rem;
+      min-height: 100vh; min-height: 100dvh;
+      display: grid; place-items: center;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+    }
+    main { width: 100%; max-width: 24rem; text-align: center; }
+    h1 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 .5rem; }
+    p { margin: 0 0 1rem; }
+    a { color: inherit; }
+    pre {
+      text-align: left; white-space: pre-wrap; word-break: break-word;
+      font-size: .8rem; padding: .75rem; border-radius: .5rem;
+      background: rgba(127, 127, 127, .15);
+      max-height: 40vh; overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1 id="title">Signing you in</h1>
+    <p id="msg">One moment.</p>
+    <pre id="out" hidden></pre>
+    <p><a href="/">Back to start</a></p>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const show = (title, text) => {
+      $('title').textContent = title;
+      $('msg').textContent = text || '';
+    };
+
+    (async () => {
+      const q = new URLSearchParams(location.search);
+      const code = q.get('code');
+      const state = q.get('state');
+      const err = q.get('error');
+      const errDesc = q.get('error_description');
+
+      // Keep the one-time code out of the address bar and browser history.
+      history.replaceState(null, '', location.pathname);
+
+      if (err) {
+        return show('Login cancelled', errDesc || err);
+      }
+
+      let saved = null;
+      try { saved = JSON.parse(sessionStorage.getItem('deriv_oauth')); } catch (e) { saved = null; }
+      sessionStorage.removeItem('deriv_oauth');
+
+      if (!code || !saved || !state || state !== saved.state) {
+        return show('Login failed', 'This login could not be verified. Go back and start again, in the same browser tab.');
+      }
+
+      try {
+        const res = await fetch('/api/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: code,
+            code_verifier: saved.verifier,
+            client_id: saved.clientId,
+            redirect_uri: saved.redirectUri
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.access_token) {
+          const detail = data.error_description ? ': ' + data.error_description : '';
+          return show('Login failed', (data.error || 'token_error') + detail);
+        }
+
+        // Token lasts about an hour. Kept for this tab only.
+        sessionStorage.setItem('deriv_token', JSON.stringify({
+          token: data.access_token,
+          expiresAt: Date.now() + (data.expires_in || 3600) * 1000
+        }));
+
+        show('Connected', 'Your Deriv account is linked. Your accounts:');
+        $('out').hidden = false;
+        $('out').textContent = JSON.stringify(
+          data.accounts !== undefined ? data.accounts : { note: data.accounts_error || 'No account data returned.' },
+          null, 2
+        );
+      } catch (e) {
+        show('Login failed', 'Network problem: ' + e.message);
+      }
+    })();
+  </script>
+</body>
+</html>
